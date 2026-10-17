@@ -1,0 +1,68 @@
+{
+  "name": "osu-skin-editor",
+  "version": "1.0.0",
+  "description": "Desktop skin editor for osu!, focused on osu!mania",
+  "type": "module",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node --test test/*.test.js",
+    "build:linux": "electron-builder --linux --publish never",
+    "build:dir": "electron-builder --linux dir --publish never"
+  },
+  "private": true,
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "adm-zip": "^0.6.1",
+    "onnxruntime-node": "^1.30.0"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.3.0"
+  },
+  "author": {
+    "name": "Ludeo",
+    "email": "xLudeo@pm.me"
+  },
+  "build": {
+    "appId": "io.github.xludeo.osuskineditor",
+    "productName": "osu! Skin Editor",
+    "executableName": "osu-skin-editor",
+    "artifactName": "osu-skin-editor-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map",
+      "!node_modules/onnxruntime-node/bin/napi-v*/{win32,darwin}/**"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/onnxruntime-node/**"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "category": "Graphics",
+      "icon": "build/icon.png",
+      "synopsis": "Skin editor for osu!, focused on osu!mania",
+      "desktop": {
+        "entry": {
+          "Name": "osu! Skin Editor",
+          "StartupWMClass": "osu-skin-editor",
+          "Keywords": "osu;skin;mania;"
+        }
+      },
+      "syncDesktopName": true
+    }
+  },
+  "desktopName": "osu-skin-editor.desktop"
+}
