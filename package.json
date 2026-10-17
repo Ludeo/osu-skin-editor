@@ -9,7 +9,8 @@
     "dev": "electron . --dev",
     "test": "node --test test/*.test.js",
     "build:linux": "electron-builder --linux --publish never",
-    "build:dir": "electron-builder --linux dir --publish never"
+    "build:dir": "electron-builder --linux dir --publish never",
+    "build:win": "node scripts/fetch-ffmpeg-win.cjs && electron-builder --win --x64 --publish never"
   },
   "private": true,
   "devDependencies": {
@@ -39,8 +40,7 @@
     "files": [
       "src/**/*",
       "package.json",
-      "!**/*.map",
-      "!node_modules/onnxruntime-node/bin/napi-v*/{win32,darwin}/**"
+      "!**/*.map"
     ],
     "asarUnpack": [
       "node_modules/ffmpeg-static/**",
@@ -54,6 +54,10 @@
       "category": "Graphics",
       "icon": "build/icon.png",
       "synopsis": "Skin editor for osu!, focused on osu!mania",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v*/{win32,darwin}/**",
+        "!node_modules/ffmpeg-static/ffmpeg.exe*"
+      ],
       "desktop": {
         "entry": {
           "Name": "osu! Skin Editor",
@@ -62,6 +66,38 @@
         }
       },
       "syncDesktopName": true
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v*/{linux,darwin}/**",
+        "!node_modules/onnxruntime-node/bin/napi-v*/win32/arm64/**",
+        "!node_modules/ffmpeg-static/ffmpeg",
+        "!node_modules/ffmpeg-static/ffmpeg.{README,LICENSE}"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "osu-skin-editor-${version}-setup.${ext}",
+      "shortcutName": "osu! Skin Editor"
+    },
+    "portable": {
+      "artifactName": "osu-skin-editor-${version}-portable.${ext}"
     }
   },
   "desktopName": "osu-skin-editor.desktop"

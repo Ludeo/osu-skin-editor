@@ -45,6 +45,14 @@ npm run build:dir     # unpacked app only, in dist/linux-unpacked (faster, for t
 
 The AppImage runs on its own (`chmod +x` it first). Unpack the tarball anywhere and run `./osu-skin-editor`. ffmpeg is not bundled, so the target machine needs it on `PATH`, unless `ffmpeg-static` was approved (see Requirements) before building, in which case its binary is packed in.
 
+## Windows build
+
+```bash
+npm run build:win     # dist/osu-skin-editor-<version>-setup.exe (installer) and -portable.exe
+```
+
+This also works from Linux. The script downloads `ffmpeg.exe` into `node_modules/ffmpeg-static` first, so the Windows build always includes ffmpeg. The exe is not code-signed, so SmartScreen will warn on first start ("More info" → "Run anyway").
+
 On first start the app looks for your osu! `Skins` folder (Windows `%LOCALAPPDATA%\osu!\Skins`, common Wine/Lutris/osu-winello locations on Linux). If it isn't found, choose it in **Settings**.
 
 ## Notes
