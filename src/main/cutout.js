@@ -105,7 +105,10 @@ async function session(root, id) {
       const mod = await import('onnxruntime-node');
       ort = mod.default ?? mod;
     }
-    sessions.set(id, ort.InferenceSession.create(file, { graphOptimizationLevel: 'all' }));
+    // With the memory arena / pattern on, a second run hands its output back in
+    // the same native buffer as the first, which Electron's V8 sandbox rejects
+    // by killing the process (SIGTRAP).
+    sessions.set(id, ort.InferenceSession.create(file, { graphOptimizationLevel: 'all', enableCpuMemArena: false, enableMemPattern: false }));
   }
   try {
     return await sessions.get(id);

@@ -3,7 +3,7 @@ import { state, on, api, elementInfo, refreshFiles, filesOf, getAnimationFramera
 import { previewImg } from '../lib/preview.js';
 import { CATEGORIES, ELEMENTS } from '../../shared/elements.js';
 import { importInto } from './convert.js';
-import { openComposer } from './composer.js';
+import { openComposer, stageBottomBase } from './composer.js';
 import { openCutout } from './cutout.js';
 import { openRecolor, noteGroupOf } from './recolor.js';
 import { getManiaSections } from '../../shared/skinIni.js';
@@ -116,6 +116,10 @@ export function mountElements(root) {
         },
       }, 'Cut out…'),
       el.compose ? h('button', { title: 'Combine images, e.g. place a character on a big background', onclick: async () => { if (await openComposer(el)) renderDetail(); } }, 'Compose…') : null,
+      el.compose === 'bottom' ? h('button', {
+        title: 'Paint mania-stage-left and -right into this image where osu! draws them, so a lane cover doesn\'t hide them',
+        onclick: async () => { if (await openComposer(el, { base: stageBottomBase(), addSides: true })) renderDetail(); },
+      }, 'Add stage sides…') : null,
       info && noteGroupOf(el.name) ? h('button', { title: 'Change the colour of this note and its hold parts', onclick: () => openRecolor(noteGroupOf(el.name)) }, 'Recolour…') : null,
       info ? h('button.danger', {
         onclick: async () => {

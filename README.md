@@ -5,6 +5,14 @@
 
 A desktop app (Electron) that makes building osu! skins — especially **osu!mania** skins — much faster.
 
+## Preview
+
+![Mania Elements](./preview/mania-elements.png)
+![Mania Layout](./preview/mania-layout.png)
+![Skin ini](./preview/skin-ini.png)
+![Copy from other skin](./preview/copy-from-skin.png)
+![Export](./preview/export.png)
+
 ## Features
 
 - **Element browser.** Every skinnable image and sound, grouped by category (Mania, Menu, Song Select, HUD, Ranking, Mods, Fonts, Standard, Sounds). Each card shows a preview and whether the element has HD (`@2x`), SD and animation frames. Drop a file onto a card to replace that element.
@@ -13,7 +21,7 @@ A desktop app (Electron) that makes building osu! skins — especially **osu!man
   - The *Copy from Skins* tab copies many elements at once.
   - It can also copy a whole mania keycount config (`[Mania]` section) along with every image it references.
 - **GIF / video → skin frames.** Import a GIF, WebM, MP4, etc. into an animatable element (menu-back, hit bursts, lighting, notes, …). ffmpeg extracts the frames as `name-0.png … name-N.png`. You can set the start time, duration, FPS, max frames and output size, and generate both `@2x` and SD versions. Transparent WebM (VP8/VP9 alpha) is supported. Static elements take one frame (or a converted image).
-- **Results panel composer.** Under Ranking → Results panel → *Compose…*: stack the current panel, panels from other skins and your own images (e.g. a character with a transparent background) as layers. Move, scale, rotate, mirror and fade them on a canvas of any size, e.g. 2732×3400 to cover the area you scroll down to on the results screen, like the Constance skin does. Undo/redo, screen guides and drag & drop are supported. Saving writes `ranking-panel@2x.png` (+ an optional SD copy). The layers are kept in the app's data folder, so you can rearrange them later.
+- **Results panel composer.** Under Ranking → Results panel → *Compose…*: stack the current panel, panels from other skins and your own images (e.g. a character with a transparent background) as layers. Move, scale, rotate, mirror and fade them on a canvas of any size, e.g. 2732×3400 to cover the area you scroll down to on the results screen, like the Constance skin does. Undo/redo, screen guides and drag & drop are supported. Saving writes `ranking-panel@2x.png` (+ an optional SD copy). The layers are kept in the app's data folder, so you can rearrange them later. The same composer is available for the mania stage sides, the stage bottom and the song select beatmap panel (Song Select → Beatmap panel, `menu-button-background`, 1398×206). For a lane cover drawn in `mania-stage-bottom`, *Add stage sides…* paints `mania-stage-left`/`-right` into it exactly where osu! draws them, so the cover doesn't hide them.
 - **Character cut-out.** *✂ Cut out character* in the sidebar, *Cut out…* on any image element, or *+ Cut out character…* in the composer: pick a picture and remove its background to get a transparent PNG. *Detect character* runs an AI model (IS-Net from the [rembg](https://github.com/danielgatis/rembg) project, one for anime/illustrations and one for photos). Each model is downloaded once (~170 MB) into the app's data folder and runs offline on your computer. Clean up the result with the erase/restore brushes, a magic wand for plain backgrounds, "Remove loose specks", and edge shrink/soften. Borders are trimmed on save.
 - **skin.ini editor.**
   - Forms for `[General]`, `[Colours]`, `[Fonts]`, `[CatchTheBeat]` and every `[Mania]` keycount: colour pickers with alpha, on/off/default toggles, dropdowns and image pickers with thumbnails.

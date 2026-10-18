@@ -1,4 +1,5 @@
-// Composer: builds an image (ranking-panel, the mania stage sides) from layers
+// Composer: builds an image (ranking-panel, the mania stage sides, the song
+// select beatmap panel) from layers
 // that can be moved, scaled, rotated and flipped, like a transparent character
 // over a background. Output is written as <base>@2x.png (+ optional SD copy).
 import { h, modal, field, toast, clear, isTopModal, TYPING } from '../lib/dom.js';
@@ -18,7 +19,23 @@ const IMAGE_FILTERS = [
 const SCREEN = { w: 2732, h: 1536 };
 
 /** What the image is for: canvas presets (w 0 = keep the width), hint and screen guides. */
-const profileOf = (el) => (el.compose === 'stage' ? stageProfile(el.side) : panelProfile());
+const profileOf = (el) => (el.compose === 'stage' ? stageProfile(el.side)
+  : el.compose === 'bottom' ? bottomProfile()
+    : el.compose === 'button' ? buttonProfile() : panelProfile());
+
+// mania-stage-bottom is drawn 1.6× larger than other skin images: one SD pixel
+// per unit of the 480-tall mania space, so 2 @2x pixels per unit and the
+// screen is 960 px tall. Other images (like the stage sides) use 480/768.
+const BOTTOM_PX = 2;
+const BOTTOM_SCREEN_H = 480 * BOTTOM_PX;
+const SIDE_PX = (BOTTOM_PX * 480) / 768;
+
+/** The mania layout of the keycount picked in the skin.ini / layout tabs (osu! defaults if it has no section). */
+function maniaModel() {
+  const keys = currentKeys() ?? 4;
+  const sec = getManiaSection(state.iniDoc, keys);
+  return { keys, sec, m: readModel(sec, keys) };
+}
 
 function panelProfile() {
   // osu! draws the top of ranking-panel 102 px below the top of the screen, or 74 for skin version 1.0.
@@ -66,21 +83,61 @@ function stageProfile(side) {
     },
   };
 }
+
+/** The stage bottom file of the picked keycount: skin.ini's StageBottom, if set. */
+export function stageBottomBase() {
+  return getValue(maniaModel().sec, 'StageBottom')?.replace(/\\/g, '/').replace(/\.png$/i, '') || 'mania-stage-bottom';
+}
+
+function bottomProfile() {
+  const { keys, m } = maniaModel();
+  // Wide enough to cover a 16:9 screen on both sides of the stage centre.
+  const centre = m.colStart + m.stageW / 2;
+  const cover = Math.ceil(2 * Math.max(centre, (480 * 16) / 9 - centre) * BOTTOM_PX);
+  return {
+    anchor: 'bottom',
+    presets: [
+      { w: cover, h: BOTTOM_SCREEN_H, label: `Whole 16:9 screen in ${keys}K (${cover}×${BOTTOM_SCREEN_H})` },
+      { w: 0, h: BOTTOM_SCREEN_H, label: `Screen height, keep the width (…×${BOTTOM_SCREEN_H})` },
+    ],
+    hint: `osu! draws this centred under the stage with its bottom on the bottom of the screen (${BOTTOM_SCREEN_H} px = screen height), on top of the notes and the stage sides. Resizing the canvas keeps the layers in place in game. "+ Stage sides" paints mania-stage-left/right into it where osu! draws them for ${keys}K, so a lane cover doesn't hide them.`,
+    guides(g, doc) {
+      const half = m.stageW * (BOTTOM_PX / 2);
+      g.vline(doc.width / 2 - half, `stage (${keys}K)`, true);
+      g.vline(doc.width / 2 + half, 'stage');
+      if (doc.height > BOTTOM_SCREEN_H) g.hline(doc.height - BOTTOM_SCREEN_H, 'top of the screen (everything above is never shown)');
+    },
+  };
+}
+
+function buttonProfile() {
+  // The size the default skin and almost every skin use; osu! draws it unscaled.
+  const std = { w: 1398, h: 206 };
+  return {
+    presets: [{ ...std, label: `Standard beatmap panel (${std.w}×${std.h})` }],
+    hint: 'osu! tints this panel (other songs, the difficulties of the selected song and the selected one each get their own colour), so light or grey art keeps the tint readable. The song title, artist and thumbnail are drawn on top of the left part.',
+    guides(g, doc) {
+      if (doc.width > std.w) g.vline(std.w, `standard panel width (${std.w})`, true);
+      if (doc.height > std.h) g.hline(std.h, `standard panel height (${std.h})`);
+    },
+  };
+}
+
 const MAX_SIDE = 16384;
 const HANDLE_PX = 10; // corner handle size on screen
 
-/** Open the composer for an element of the current skin. Resolves true if saved. */
 /**
  * Open the composer for an element of the current skin. `base` is the file to
- * write if skin.ini points the element elsewhere. Resolves true if saved.
+ * write if skin.ini points the element elsewhere. `addSides` (stage bottom)
+ * starts with the stage sides already placed. Resolves true if saved.
  */
-export async function openComposer(el, { base = el.name } = {}) {
+export async function openComposer(el, { base = el.name, addSides = false } = {}) {
   if (!state.skin) return false;
   const saved = await api.composeLoad(state.skin.path, base).catch(() => null);
-  return Boolean(await modal(`Compose ${el.label}`, (close, backdrop) => build(el, base, saved, close, backdrop), { full: true }));
+  return Boolean(await modal(`Compose ${el.label}`, (close, backdrop) => build(el, base, saved, close, backdrop, { addSides }), { full: true }));
 }
 
-function build(el, base, saved, close, backdrop) {
+function build(el, base, saved, close, backdrop, opts) {
   const profile = profileOf(el);
   const PRESETS = profile.presets;
   const doc = { width: PRESETS[0].w || 400, height: PRESETS[0].h, fill: '', layers: [] };
@@ -90,7 +147,8 @@ function build(el, base, saved, close, backdrop) {
 
   // ---- undo -------------------------------------------------------------
   // Layer images stay loaded in `layer` objects; snapshots only hold numbers.
-  const PROPS = ['x', 'y', 'scale', 'rotation', 'opacity', 'flip', 'hidden', 'locked'];
+  // stretch: extra vertical scale, for images osu! stretches (the stage sides).
+  const PROPS = ['x', 'y', 'scale', 'stretch', 'rotation', 'opacity', 'flip', 'hidden', 'locked'];
   const known = new Map(); // id -> layer, also for removed layers (undo)
   const snapshot = () => JSON.stringify({
     width: doc.width, height: doc.height, fill: doc.fill,
@@ -134,7 +192,7 @@ function build(el, base, saved, close, backdrop) {
     const fit = Math.min(1, (doc.width * 0.9) / w, (doc.height * 0.9) / hgt);
     const layer = {
       id: nextId++, name: props.name ?? basename(path), path, img, w, h: hgt,
-      x: doc.width / 2, y: doc.height / 2, scale: Math.round(fit * 1000) / 1000, rotation: 0, opacity: 1,
+      x: doc.width / 2, y: doc.height / 2, scale: Math.round(fit * 1000) / 1000, stretch: 1, rotation: 0, opacity: 1,
       flip: false, hidden: false, locked: false, ...props,
     };
     known.set(layer.id, layer);
@@ -143,14 +201,43 @@ function build(el, base, saved, close, backdrop) {
     return layer;
   }
 
-  /** The element as it currently is in a skin, locked at the top-left at @2x scale. */
+  /** The element as it currently is in a skin, locked at the top-left (bottom centre for the stage bottom) at @2x scale. */
   async function addPanelOf(skinPath, files, name) {
     const info = skinPath === state.skin.path ? resolveImage(base) : elementInfo(el, { skinPath, files });
     if (!info) return null;
     const scale = info.hd ? 1 : 2;
     const layer = await addLayer(joinPath(skinPath, info.rel), { name, locked: true });
-    if (layer) Object.assign(layer, { scale, x: (layer.w * scale) / 2, y: (layer.h * scale) / 2 });
+    if (!layer) return null;
+    const [w, hgt] = [layer.w * scale, layer.h * scale];
+    Object.assign(layer, { scale, x: w / 2, y: hgt / 2 }, profile.anchor === 'bottom' && { x: doc.width / 2, y: doc.height - hgt / 2 });
     return layer;
+  }
+
+  /** mania-stage-left/right where osu! draws them next to the stage, on top of the other layers. */
+  async function addSides() {
+    const { keys, sec, m } = maniaModel();
+    let added = 0;
+    for (const [key, name, dir] of [['StageLeft', 'mania-stage-left', -1], ['StageRight', 'mania-stage-right', 1]]) {
+      const info = resolveImage(getValue(sec, key)) ?? resolveImage(name);
+      if (!info) continue;
+      // Placing them again replaces the earlier copies.
+      const tag = `${name} (${keys}K stage side)`;
+      doc.layers = doc.layers.filter((l) => !(l.name.startsWith(`${name} (`) && l.name.endsWith(' stage side)')));
+      const layer = await addLayer(joinPath(state.skin.path, info.rel), { name: tag, locked: true });
+      if (!layer) continue;
+      // Natural width, stretched to the screen height, touching the stage edge.
+      const scale = SIDE_PX * (info.hd ? 0.5 : 1);
+      Object.assign(layer, {
+        scale,
+        stretch: BOTTOM_SCREEN_H / (layer.h * scale),
+        x: doc.width / 2 + dir * ((m.stageW * BOTTOM_PX) / 2 + (layer.w * scale) / 2),
+        y: doc.height - BOTTOM_SCREEN_H / 2,
+      });
+      added++;
+    }
+    selected = null;
+    if (added) toast(`Placed the stage sides for ${keys}K. They're locked; unlock them to adjust.`, 'ok');
+    else toast('This skin has no mania-stage-left or mania-stage-right image.', 'error');
   }
 
   async function restoreProject(p) {
@@ -164,13 +251,13 @@ function build(el, base, saved, close, backdrop) {
     const dx = px - l.x;
     const dy = py - l.y;
     const ux = (dx * Math.cos(r) - dy * Math.sin(r)) / l.scale;
-    const uy = (dx * Math.sin(r) + dy * Math.cos(r)) / l.scale;
+    const uy = (dx * Math.sin(r) + dy * Math.cos(r)) / (l.scale * l.stretch);
     return Math.abs(ux) <= l.w / 2 && Math.abs(uy) <= l.h / 2;
   }
   function corners(l) {
     const r = (l.rotation * Math.PI) / 180;
     const hw = (l.w * l.scale) / 2;
-    const hh = (l.h * l.scale) / 2;
+    const hh = (l.h * l.scale * l.stretch) / 2;
     return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => [
       l.x + x * Math.cos(r) - y * Math.sin(r),
       l.y + x * Math.sin(r) + y * Math.cos(r),
@@ -189,7 +276,7 @@ function build(el, base, saved, close, backdrop) {
       ctx.globalAlpha = l.opacity;
       ctx.translate(l.x, l.y);
       ctx.rotate((l.rotation * Math.PI) / 180);
-      ctx.scale(l.flip ? -l.scale : l.scale, l.scale);
+      ctx.scale(l.flip ? -l.scale : l.scale, l.scale * l.stretch);
       ctx.drawImage(l.img, -l.w / 2, -l.h / 2);
       ctx.restore();
     }
@@ -437,13 +524,25 @@ function build(el, base, saved, close, backdrop) {
   };
 
   // Canvas size
-  const widthIn = num({ min: 1, max: MAX_SIDE, step: 1 }, () => doc.width, (v) => (doc.width = clampSide(v)));
-  const heightIn = num({ min: 1, max: MAX_SIDE, step: 1 }, () => doc.height, (v) => (doc.height = clampSide(v)));
+  const widthIn = num({ min: 1, max: MAX_SIDE, step: 1 }, () => doc.width, (v) => resize(v, doc.height));
+  const heightIn = num({ min: 1, max: MAX_SIDE, step: 1 }, () => doc.height, (v) => resize(doc.width, v));
   const clampSide = (v) => Math.max(1, Math.min(MAX_SIDE, Math.round(v)));
+  // A bottom-anchored image grows upwards and to both sides, so the layers keep their spot in game.
+  function resize(w, hgt) {
+    w = clampSide(w);
+    hgt = clampSide(hgt);
+    if (profile.anchor === 'bottom') {
+      for (const l of doc.layers) {
+        l.x += (w - doc.width) / 2;
+        l.y += hgt - doc.height;
+      }
+    }
+    Object.assign(doc, { width: w, height: hgt });
+  }
   const presetSel = h('select', {
     onchange: (e) => {
       const p = PRESETS[e.target.value];
-      if (p) Object.assign(doc, { width: p.w || doc.width, height: p.h });
+      if (p) resize(p.w || doc.width, p.h);
       e.target.value = '';
       commit();
     },
@@ -468,7 +567,7 @@ function build(el, base, saved, close, backdrop) {
   const lockedChk = check('Locked (can\'t be moved on the canvas)', L('locked'), setL('locked'));
   const sizeInfo = h('div.muted.small');
   const fitTo = (sw, sh) => {
-    selected.scale = Math.round(Math.min(sw / selected.w, sh / selected.h) * 1000) / 1000;
+    selected.scale = Math.round(Math.min(sw / selected.w, sh / (selected.h * selected.stretch)) * 1000) / 1000;
     commit();
   };
   const layerBox = h('fieldset',
@@ -489,7 +588,7 @@ function build(el, base, saved, close, backdrop) {
   function refreshProps() {
     syncers.forEach((s) => s.sync());
     layerBox.hidden = !selected;
-    if (selected) sizeInfo.textContent = `${selected.name} · ${selected.w}×${selected.h} → ${Math.round(selected.w * selected.scale)}×${Math.round(selected.h * selected.scale)}`;
+    if (selected) sizeInfo.textContent = `${selected.name} · ${selected.w}×${selected.h} → ${Math.round(selected.w * selected.scale)}×${Math.round(selected.h * selected.scale * selected.stretch)}`;
     undoBtn.disabled = !undo.length;
     redoBtn.disabled = !redo.length;
   }
@@ -604,6 +703,10 @@ function build(el, base, saved, close, backdrop) {
           },
         }, '+ Cut out character…'),
         own ? h('button.small', { onclick: async () => { await addPanelOf(state.skin.path, state.files, `current ${el.name}`); commit(); } }, `+ Current ${el.name}`) : null,
+        el.compose === 'bottom' ? h('button.small', {
+          title: 'Paint mania-stage-left and -right where osu! draws them next to the stage, so they show above this image',
+          onclick: async () => { await addSides(); commit(); },
+        }, '+ Stage sides') : null,
       ),
       fromSkin,
     ),
@@ -628,9 +731,13 @@ function build(el, base, saved, close, backdrop) {
     if (saved && !saved.stale) await restoreProject(saved.project);
     else if (own) {
       const l = await addPanelOf(state.skin.path, state.files, `current ${el.name}`);
-      if (l) Object.assign(doc, { width: Math.round(l.w * l.scale), height: Math.round(l.h * l.scale) });
+      if (l) resize(l.w * l.scale, l.h * l.scale);
     }
     committed = savedState = snapshot();
+    if (opts.addSides) {
+      await addSides();
+      commit();
+    }
     refreshAll();
     applyZoom();
   })();

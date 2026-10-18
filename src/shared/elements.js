@@ -5,7 +5,8 @@
 //   sound: true for audio elements (.wav/.ogg/.mp3)
 //   size : recommended @2x (HD) size in pixels, informational only
 //   compose: can be built in the composer (layers, e.g. a character):
-//            'panel' for ranking-panel, 'stage' for the mania stage sides (+ side)
+//            'panel' for ranking-panel, 'stage' for the mania stage sides (+ side),
+//            'button' for the song select beatmap panel, 'bottom' for mania-stage-bottom
 
 export const CATEGORIES = [
   { id: 'mania', label: 'Mania' },
@@ -42,7 +43,7 @@ const mania = [
   el('mania', 'mania-noteST', 'Hold tail S', { anim: '-' }),
   el('mania', 'mania-stage-left', 'Stage left border', { compose: 'stage', side: 'left' }),
   el('mania', 'mania-stage-right', 'Stage right border', { compose: 'stage', side: 'right' }),
-  el('mania', 'mania-stage-bottom', 'Stage bottom'),
+  el('mania', 'mania-stage-bottom', 'Stage bottom', { compose: 'bottom' }),
   el('mania', 'mania-stage-hint', 'Judgement line (hint)'),
   el('mania', 'mania-stage-light', 'Column light', { anim: '-' }),
   el('mania', 'lightingN', 'Note hit lighting', { anim: '-' }),
@@ -73,7 +74,7 @@ const iface = [
 ];
 
 const songselect = [
-  el('songselect', 'menu-button-background', 'Beatmap panel'),
+  el('songselect', 'menu-button-background', 'Beatmap panel', { compose: 'button' }),
   el('songselect', 'selection-tab', 'Tab'),
   el('songselect', 'star', 'Difficulty star'),
   el('songselect', 'star2', 'Star (menu particles)'),

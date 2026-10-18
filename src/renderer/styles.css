@@ -281,7 +281,7 @@ legend { color: var(--muted); font-size: 12px; padding: 0 4px; }
 progress { width: 100%; accent-color: var(--accent); }
 
 /* Panel composer */
-.composer { flex: 1; display: flex; min-height: 0; }
+.composer { flex: 1; display: flex; min-height: 0; min-width: 0; }
 .compose-stage { flex: 1; overflow: auto; display: flex; padding: 16px; background: var(--bg); min-width: 0; }
 .compose-stage canvas { margin: auto; flex: none; box-shadow: 0 0 0 1px var(--line); touch-action: none; }
 .compose-side { width: 330px; flex: none; border-left: 1px solid var(--line); padding: 12px; overflow-y: auto; }

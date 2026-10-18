@@ -6,7 +6,7 @@ import { widget } from '../lib/fields.js';
 import { keycountBar, currentKeys } from './config.js';
 import { MANIA_COLUMN_KEYS, columnKey } from '../../shared/iniSchema.js';
 import { defaultColumnStyle, ELEMENTS } from '../../shared/elements.js';
-import { openComposer } from './composer.js';
+import { openComposer, stageBottomBase } from './composer.js';
 import { openRecolor, columnNoteGroup } from './recolor.js';
 import { getManiaSection, getValue, setValue, parseList, formatList, parseColour } from '../../shared/skinIni.js';
 
@@ -69,11 +69,11 @@ export function mountLayout(root) {
     return (v && resolveImage(v)) || (fallbackBase && resolveImage(fallbackBase)) || null;
   }
 
-  /** Natural-size sprite: osu! skin pixel scale, halved for @2x files. */
-  function sprite(info, cls, style) {
+  /** Natural-size sprite: osu! skin pixel scale (or `px`), halved for @2x files. */
+  function sprite(info, cls, style, px = SKIN_PX) {
     const node = h(`img.${cls}`, { src: info.url, draggable: false, alt: '', style });
     node.onload = () => {
-      const f = SKIN_PX / (info.hd ? 2 : 1);
+      const f = px / (info.hd ? 2 : 1);
       node.style.width = `${node.naturalWidth * f}px`;
     };
     return node;
@@ -125,7 +125,8 @@ export function mountLayout(root) {
     if (left) stage.append(sprite(left, 'stage-side', { right: '100%' }));
     if (right) stage.append(sprite(right, 'stage-side', { left: '100%' }));
     const bottom = stageImg('StageBottom', 'mania-stage-bottom');
-    if (bottom) stage.append(sprite(bottom, 'stage-bottom', {}));
+    // osu! draws the stage bottom 1.6× larger: one SD pixel per unit.
+    if (bottom) stage.append(sprite(bottom, 'stage-bottom', {}, 1));
 
     // Stage hint (judgement line), stretched to each column
     const hint = stageImg('StageHint', 'mania-stage-hint');
@@ -303,7 +304,11 @@ export function mountLayout(root) {
           title: `Arrange images into ${base}, e.g. a character next to the stage`,
           onclick: () => openComposer(ELEMENTS.find((e) => e.name === name), { base }),
         }, `Compose ${side} side…`);
-      })),
+      }),
+      h('button.small', {
+        title: 'Paint the stage sides into mania-stage-bottom, so a lane cover doesn\'t hide them',
+        onclick: () => openComposer(ELEMENTS.find((e) => e.name === 'mania-stage-bottom'), { base: stageBottomBase(), addSides: true }),
+      }, 'Stage sides over bottom…')),
       h('h4', ui.column === null ? 'Column' : `Column ${ui.column + 1}`),
       colPanel,
     );

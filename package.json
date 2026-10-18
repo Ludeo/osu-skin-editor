@@ -1,6 +1,6 @@
 {
   "name": "osu-skin-editor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop skin editor for osu!, focused on osu!mania",
   "type": "module",
   "main": "src/main/main.js",
