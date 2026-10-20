@@ -3,7 +3,7 @@ import { state, on, api, elementInfo, refreshFiles, filesOf, getAnimationFramera
 import { previewImg } from '../lib/preview.js';
 import { CATEGORIES, ELEMENTS } from '../../shared/elements.js';
 import { importInto } from './convert.js';
-import { openComposer, stageBottomBase } from './composer.js';
+import { openComposer, stageBottomBase, extractSavedSides } from './composer.js';
 import { openCutout } from './cutout.js';
 import { openRecolor, noteGroupOf } from './recolor.js';
 import { getManiaSections } from '../../shared/skinIni.js';
@@ -120,6 +120,10 @@ export function mountElements(root) {
         title: 'Paint mania-stage-left and -right into this image where osu! draws them, so a lane cover doesn\'t hide them',
         onclick: async () => { if (await openComposer(el, { base: stageBottomBase(), addSides: true })) renderDetail(); },
       }, 'Add stage sides…') : null,
+      el.compose === 'bottom' ? h('button', {
+        title: 'Write the stage sides painted into this image back into the skin as mania-stage-left/-right, e.g. after deleting those files',
+        onclick: async () => { if (await extractSavedSides()) renderDetail(); },
+      }, 'Extract stage sides') : null,
       info && noteGroupOf(el.name) ? h('button', { title: 'Change the colour of this note and its hold parts', onclick: () => openRecolor(noteGroupOf(el.name)) }, 'Recolour…') : null,
       info ? h('button.danger', {
         onclick: async () => {

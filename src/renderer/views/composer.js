@@ -2,7 +2,7 @@
 // select beatmap panel) from layers
 // that can be moved, scaled, rotated and flipped, like a transparent character
 // over a background. Output is written as <base>@2x.png (+ optional SD copy).
-import { h, modal, field, toast, clear, isTopModal, TYPING } from '../lib/dom.js';
+import { h, modal, field, toast, clear, isTopModal, TYPING, confirmDialog } from '../lib/dom.js';
 import { openCutout } from './cutout.js';
 import { colorInput } from '../lib/colorPicker.js';
 import { readModel } from './layout.js';
@@ -86,7 +86,59 @@ function stageProfile(side) {
 
 /** The stage bottom file of the picked keycount: skin.ini's StageBottom, if set. */
 export function stageBottomBase() {
-  return getValue(maniaModel().sec, 'StageBottom')?.replace(/\\/g, '/').replace(/\.png$/i, '') || 'mania-stage-bottom';
+  return iniBase(maniaModel().sec, 'StageBottom', 'mania-stage-bottom');
+}
+
+/** The file a skin.ini image key points to (without .png), or the default name. */
+const iniBase = (sec, key, name) => getValue(sec, key)?.replace(/\\/g, '/').replace(/\.png$/i, '') || name;
+
+const SIDES = [['StageLeft', 'mania-stage-left', -1], ['StageRight', 'mania-stage-right', 1]];
+const isSideLayer = (l, name) => l.name.startsWith(`${name} (`) && l.name.endsWith(' stage side)');
+// @2x sides are placed at half the scale of SD ones.
+const isHdSide = (l) => l.scale < SIDE_PX * 0.75;
+
+/**
+ * Write the stage side layers of a stage-bottom composition back into the
+ * skin as mania-stage-left/right, so the separate files can be deleted and
+ * restored later. Resolves true if anything was written.
+ */
+export async function extractSides(layers) {
+  const { sec } = maniaModel();
+  const files = [];
+  const replace = [];
+  for (const [key, name] of SIDES) {
+    const l = layers.find((x) => isSideLayer(x, name));
+    if (!l) continue;
+    const img = l.img ?? (await loadImage(l.path));
+    const c = h('canvas', { width: img.naturalWidth, height: img.naturalHeight });
+    c.getContext('2d').drawImage(img, 0, 0);
+    const blob = await new Promise((resolve) => c.toBlob(resolve, 'image/png'));
+    const base = iniBase(sec, key, name);
+    files.push({ rel: `${base}${isHdSide(l) ? '@2x' : ''}.png`, data: new Uint8Array(await blob.arrayBuffer()) });
+    replace.push(base);
+  }
+  if (!files.length) {
+    toast('There are no stage side layers in this stage bottom. Add them with "+ Stage sides" first.', 'error', 6000);
+    return false;
+  }
+  const existing = replace.filter((b) => resolveImage(b));
+  if (existing.length && !(await confirmDialog('Extract stage sides', `Replace ${existing.join(' and ')} in this skin with the copies from the stage bottom?`, 'Replace'))) return false;
+  await api.writeImages(state.skin.path, files, { replace });
+  await refreshFiles();
+  toast(`Wrote ${files.map((f) => f.rel).join(', ')}`, 'ok');
+  return true;
+}
+
+/** extractSides() from the last saved stage-bottom composition. */
+export async function extractSavedSides() {
+  try {
+    const saved = await api.composeLoad(state.skin.path, stageBottomBase());
+    if (saved) return await extractSides(saved.project.layers);
+    toast('This skin has no stage bottom made in the composer yet. Use "Add stage sides…" first.', 'error', 6000);
+  } catch (err) {
+    toast(err.message, 'error', 6000);
+  }
+  return false;
 }
 
 function bottomProfile() {
@@ -217,12 +269,12 @@ function build(el, base, saved, close, backdrop, opts) {
   async function addSides() {
     const { keys, sec, m } = maniaModel();
     let added = 0;
-    for (const [key, name, dir] of [['StageLeft', 'mania-stage-left', -1], ['StageRight', 'mania-stage-right', 1]]) {
+    for (const [key, name, dir] of SIDES) {
       const info = resolveImage(getValue(sec, key)) ?? resolveImage(name);
       if (!info) continue;
       // Placing them again replaces the earlier copies.
       const tag = `${name} (${keys}K stage side)`;
-      doc.layers = doc.layers.filter((l) => !(l.name.startsWith(`${name} (`) && l.name.endsWith(' stage side)')));
+      doc.layers = doc.layers.filter((l) => !isSideLayer(l, name));
       const layer = await addLayer(joinPath(state.skin.path, info.rel), { name: tag, locked: true });
       if (!layer) continue;
       // Natural width, stretched to the screen height, touching the stage edge.
@@ -707,6 +759,10 @@ function build(el, base, saved, close, backdrop, opts) {
           title: 'Paint mania-stage-left and -right where osu! draws them next to the stage, so they show above this image',
           onclick: async () => { await addSides(); commit(); },
         }, '+ Stage sides') : null,
+        el.compose === 'bottom' ? h('button.small', {
+          title: 'Write the stage side layers back into the skin as mania-stage-left/-right, e.g. to restore them after deleting those files',
+          onclick: () => extractSides(doc.layers).catch((err) => toast(err.message, 'error', 6000)),
+        }, 'Extract stage sides') : null,
       ),
       fromSkin,
     ),

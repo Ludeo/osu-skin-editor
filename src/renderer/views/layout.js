@@ -6,7 +6,7 @@ import { widget } from '../lib/fields.js';
 import { keycountBar, currentKeys } from './config.js';
 import { MANIA_COLUMN_KEYS, columnKey } from '../../shared/iniSchema.js';
 import { defaultColumnStyle, ELEMENTS } from '../../shared/elements.js';
-import { openComposer, stageBottomBase } from './composer.js';
+import { openComposer, stageBottomBase, extractSavedSides } from './composer.js';
 import { openRecolor, columnNoteGroup } from './recolor.js';
 import { getManiaSection, getValue, setValue, parseList, formatList, parseColour } from '../../shared/skinIni.js';
 
@@ -308,7 +308,11 @@ export function mountLayout(root) {
       h('button.small', {
         title: 'Paint the stage sides into mania-stage-bottom, so a lane cover doesn\'t hide them',
         onclick: () => openComposer(ELEMENTS.find((e) => e.name === 'mania-stage-bottom'), { base: stageBottomBase(), addSides: true }),
-      }, 'Stage sides over bottom…')),
+      }, 'Stage sides over bottom…'),
+      h('button.small', {
+        title: 'Write the stage sides painted into mania-stage-bottom back into the skin as separate files, e.g. after deleting them',
+        onclick: () => extractSavedSides(),
+      }, 'Extract sides from bottom')),
       h('h4', ui.column === null ? 'Column' : `Column ${ui.column + 1}`),
       colPanel,
     );
