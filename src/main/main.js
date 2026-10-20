@@ -213,12 +213,12 @@ function registerIpc() {
   const composeRoot = () => path.join(app.getPath('userData'), 'compositions');
   handle('compose:load', async (skinDir, base) => {
     const r = await compose.load(composeRoot(), skinPath(skinDir), base);
-    r?.project.layers.forEach((l) => allowedFiles.add(path.resolve(l.path)));
+    r?.project.layers.forEach((l) => [l.path, l.maskPath].forEach((p) => p && allowedFiles.add(path.resolve(p))));
     return r;
   });
-  handle('compose:save', (skinDir, base, images, project) => {
+  handle('compose:save', (skinDir, base, images, project, opts) => {
     for (const l of project.layers) if (!isAllowed(l.path)) throw new Error(`File not allowed: ${l.path}`);
-    return compose.save(composeRoot(), skinPath(skinDir), base, images, project);
+    return compose.save(composeRoot(), skinPath(skinDir), base, images, project, { anim: opts?.anim === '' ? '' : '-' });
   });
 
   const modelRoot = () => path.join(app.getPath('userData'), 'models');

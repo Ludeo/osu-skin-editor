@@ -42,7 +42,7 @@ contextBridge.exposeInMainWorld('api', {
   importSound: (src, dir, base) => call('media:importSound', src, dir, base),
   cancelConvert: () => call('media:cancel'),
   composeLoad: (dir, base) => call('compose:load', dir, base),
-  composeSave: (dir, base, images, project) => call('compose:save', dir, base, images, project),
+  composeSave: (dir, base, images, project, opts) => call('compose:save', dir, base, images, project, opts),
   cutoutModels: () => call('cutout:models'),
   cutoutDownload: (id) => call('cutout:download', id),
   cutoutCancelDownload: () => call('cutout:cancelDownload'),

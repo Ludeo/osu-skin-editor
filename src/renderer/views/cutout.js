@@ -1,9 +1,11 @@
 // Cut-out helper: removes the background around a character so it can be used
-// as a transparent PNG. An AI model makes the first pass; brushes, a magic wand
-// and edge settings clean it up.
+// as a transparent PNG, or removes the character and keeps the background. An
+// AI model makes the first pass; brushes, a magic wand and edge settings clean
+// it up.
 //
 // Transparency is computed per pixel from:
-//   AI mask (through the cutoff/softness curve, or fully opaque without one)
+//   AI mask (through the cutoff/softness curve, inverted when keeping the
+//   background, or fully opaque without one)
 //   → raised by the "restore" coverage, lowered by the "erase" coverage
 //   → times the picture's own alpha → edge shrink → edge softening.
 // Keeping the edits separate from the AI mask lets the curve be changed later
@@ -66,7 +68,7 @@ function build(img, path, action, close, backdrop) {
   for (let i = 0; i < N; i++) alpha0[i] = out.data[i * 4 + 3];
 
   // ---- state ------------------------------------------------------------
-  const p = { cut: 50, soft: 100, shrink: 0, feather: 0 };
+  const p = { cut: 50, soft: 100, shrink: 0, feather: 0, invert: false };
   let ai = null; // Uint8Array(N), AI mask at full size
   let erase = new Uint8Array(N);
   let keep = new Uint8Array(N);
@@ -93,6 +95,7 @@ function build(img, path, action, close, backdrop) {
     Object.assign(p, s.p);
     ({ ai, erase, keep } = s);
     syncInputs();
+    syncMode();
     computeAll();
     refreshButtons();
   }
@@ -107,6 +110,7 @@ function build(img, path, action, close, backdrop) {
     for (let k = 0; k < 256; k++) {
       const m = k / 255;
       lut[k] = s < 1e-3 ? (m >= t ? 255 : 0) : Math.round(Math.max(0, Math.min(1, (m - (t - s)) / (2 * s))) * 255);
+      if (p.invert) lut[k] = 255 - lut[k];
     }
   }
 
@@ -565,12 +569,41 @@ function build(img, path, action, close, backdrop) {
     for (const [k, b] of Object.entries(toolBtns)) b.classList.toggle('active', k === id);
     brushOpts.hidden = id === 'wand';
     wandOpts.hidden = id !== 'wand';
+    const [kept, removed] = p.invert ? ['background', 'character'] : ['character', 'background'];
     toolHint.textContent = id === 'wand'
-      ? 'Click a background colour to remove it, e.g. a plain or studio background.'
+      ? p.invert
+        ? 'Click a colour of the character to remove it, e.g. a flat-coloured outfit.'
+        : 'Click a background colour to remove it, e.g. a plain or studio background.'
       : id === 'erase'
-        ? 'Paint over leftovers of the background. Hold Alt to restore instead.'
-        : 'Paint to bring back parts of the character that were removed. Hold Alt to erase instead.';
+        ? `Paint over leftovers of the ${removed}. Hold Alt to restore instead.`
+        : `Paint to bring back parts of the ${kept} that were removed. Hold Alt to erase instead.`;
     updateCursor();
+  }
+
+  // What to keep: the character (normal cut-out) or the background around it.
+  const modeBtns = {};
+  const modeRow = h('div.segmented', [[false, 'Character'], [true, 'Background']].map(([inv, label]) =>
+    (modeBtns[inv] = h('button.small', {
+      title: inv ? 'Remove the character and keep the background' : 'Remove the background and keep the character',
+      onclick: () => {
+        if (p.invert === inv) return;
+        checkpoint();
+        p.invert = inv;
+        syncMode();
+        computeAll();
+      },
+    }, label))));
+  const cutHint = h('small.hint');
+  const shrinkHint = h('small.hint');
+  function syncMode() {
+    for (const [k, b] of Object.entries(modeBtns)) b.classList.toggle('active', String(p.invert) === k);
+    cutHint.textContent = p.invert
+      ? 'Lower the cutoff if bits of the character remain, raise it if parts of the background are missing. Lower softness gives harder edges.'
+      : 'Raise the cutoff if bits of background remain, lower it if parts of the character are missing. Lower softness gives harder edges.';
+    shrinkHint.textContent = p.invert
+      ? 'Shrinking removes a coloured fringe left over from the character.'
+      : 'Shrinking removes a coloured fringe left over from the old background.';
+    setTool(tool.id);
   }
 
   const undoBtn = h('button.small', { title: 'Undo (Ctrl+Z)', onclick: () => step(undo, redo) }, '↶ Undo');
@@ -599,7 +632,7 @@ function build(img, path, action, close, backdrop) {
     try {
       const blob = await new Promise((resolve) => c.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('Could not create the PNG');
-      const name = `${basename(path).replace(/\.[^.]+$/, '')}-cutout.png`;
+      const name = `${basename(path).replace(/\.[^.]+$/, '')}-${p.invert ? 'background' : 'cutout'}.png`;
       const dest = await api.cutoutSave(new Uint8Array(await blob.arrayBuffer()), { name, ask });
       status.textContent = '';
       if (!dest) return null;
@@ -638,11 +671,13 @@ function build(img, path, action, close, backdrop) {
     h('div.history', undoBtn, redoBtn),
     h('fieldset',
       h('legend', '1. Automatic'),
+      // Not a <label>: clicking the caption would press the first button.
+      h('div.field', h('span.label', 'Keep'), modeRow),
       field('Picture type', modelSel),
       h('div.actions', aiBtn),
       progress, cancelDl, aiStatus,
       cutS, softS,
-      h('small.hint', 'Raise the cutoff if bits of background remain, lower it if parts of the character are missing. Lower softness gives harder edges.'),
+      cutHint,
     ),
     h('fieldset',
       h('legend', '2. Touch up'),
@@ -656,7 +691,7 @@ function build(img, path, action, close, backdrop) {
     h('fieldset',
       h('legend', '3. Edges'),
       shrinkS, featherS,
-      h('small.hint', 'Shrinking removes a coloured fringe left over from the old background.'),
+      shrinkHint,
     ),
     h('fieldset',
       h('legend', 'View'),
@@ -676,7 +711,7 @@ function build(img, path, action, close, backdrop) {
       primary),
   );
 
-  setTool('erase');
+  syncMode();
   refreshButtons();
   computeAll();
   requestAnimationFrame(() => {

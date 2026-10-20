@@ -1,7 +1,9 @@
-// Composer: builds an image (ranking-panel, the mania stage sides, the song
-// select beatmap panel) from layers
-// that can be moved, scaled, rotated and flipped, like a transparent character
-// over a background. Output is written as <base>@2x.png (+ optional SD copy).
+// Composer: builds any image element (with extra presets and guides for
+// ranking-panel, the mania stage sides/bottom and the song select beatmap
+// panel) from layers that can be moved, scaled, rotated and flipped, like a
+// transparent character over a background. Parts of a layer can be erased
+// with a brush without changing its source image. Output is written as
+// <base>@2x.png (+ optional SD copy).
 import { h, modal, field, toast, clear, isTopModal, TYPING, confirmDialog } from '../lib/dom.js';
 import { openCutout } from './cutout.js';
 import { colorInput } from '../lib/colorPicker.js';
@@ -21,7 +23,8 @@ const SCREEN = { w: 2732, h: 1536 };
 /** What the image is for: canvas presets (w 0 = keep the width), hint and screen guides. */
 const profileOf = (el) => (el.compose === 'stage' ? stageProfile(el.side)
   : el.compose === 'bottom' ? bottomProfile()
-    : el.compose === 'button' ? buttonProfile() : panelProfile());
+    : el.compose === 'button' ? buttonProfile()
+      : el.compose === 'panel' ? panelProfile() : genericProfile(el));
 
 // mania-stage-bottom is drawn 1.6× larger than other skin images: one SD pixel
 // per unit of the 480-tall mania space, so 2 @2x pixels per unit and the
@@ -175,6 +178,23 @@ function buttonProfile() {
   };
 }
 
+/** Any other image: starts at the size of the current image (or 512×512 if there is none). */
+function genericProfile(el) {
+  const animated = el.anim !== undefined && resolveImage(el.name, { anim: el.anim })?.frames.length;
+  return {
+    start: el.size ? { w: el.size[0], h: el.size[1] } : { w: 512, h: 512 },
+    presets: [
+      ...(el.size ? [{ w: el.size[0], h: el.size[1], label: `Recommended size (${el.size[0]}×${el.size[1]})` }] : []),
+      { w: SCREEN.w, h: SCREEN.h, label: `16:9 screen (${SCREEN.w}×${SCREEN.h})` },
+    ],
+    hint: `Saved as a single @2x image${animated ? '. It replaces the current animation frames, since osu! prefers frames over a still image' : ''}. Transparent areas stay transparent in game.`,
+    guides(g, doc) {
+      if (doc.width > SCREEN.w) g.vline(SCREEN.w, 'right edge of a 16:9 screen');
+      if (doc.height > SCREEN.h) g.hline(SCREEN.h, 'bottom of a 16:9 screen');
+    },
+  };
+}
+
 const MAX_SIDE = 16384;
 const HANDLE_PX = 10; // corner handle size on screen
 
@@ -192,7 +212,10 @@ export async function openComposer(el, { base = el.name, addSides = false } = {}
 function build(el, base, saved, close, backdrop, opts) {
   const profile = profileOf(el);
   const PRESETS = profile.presets;
-  const doc = { width: PRESETS[0].w || 400, height: PRESETS[0].h, fill: '', layers: [] };
+  const start = profile.start ?? PRESETS[0];
+  const doc = { width: start.w || 400, height: start.h, fill: '', layers: [] };
+  const anim = el.anim ?? '-';
+  const current = () => resolveImage(base, { anim });
   const view = { zoom: 0, guides: true, sd: true }; // zoom 0 = fit
   let selected = null;
   let nextId = 1;
@@ -204,7 +227,7 @@ function build(el, base, saved, close, backdrop, opts) {
   const known = new Map(); // id -> layer, also for removed layers (undo)
   const snapshot = () => JSON.stringify({
     width: doc.width, height: doc.height, fill: doc.fill,
-    layers: doc.layers.map((l) => ({ id: l.id, ...Object.fromEntries(PROPS.map((k) => [k, l[k]])) })),
+    layers: doc.layers.map((l) => ({ id: l.id, maskVer: l.maskVer, ...Object.fromEntries(PROPS.map((k) => [k, l[k]])) })),
   });
   let committed = snapshot();
   let savedState = committed;
@@ -245,8 +268,9 @@ function build(el, base, saved, close, backdrop, opts) {
     const layer = {
       id: nextId++, name: props.name ?? basename(path), path, img, w, h: hgt,
       x: doc.width / 2, y: doc.height / 2, scale: Math.round(fit * 1000) / 1000, stretch: 1, rotation: 0, opacity: 1,
-      flip: false, hidden: false, locked: false, ...props,
+      flip: false, hidden: false, locked: false, masks: [null], maskVer: 0, ...props,
     };
+    if (props.maskPath) await loadMask(layer, props.maskPath);
     known.set(layer.id, layer);
     doc.layers.push(layer);
     selected = layer;
@@ -255,7 +279,7 @@ function build(el, base, saved, close, backdrop, opts) {
 
   /** The element as it currently is in a skin, locked at the top-left (bottom centre for the stage bottom) at @2x scale. */
   async function addPanelOf(skinPath, files, name) {
-    const info = skinPath === state.skin.path ? resolveImage(base) : elementInfo(el, { skinPath, files });
+    const info = skinPath === state.skin.path ? current() : elementInfo(el, { skinPath, files });
     if (!info) return null;
     const scale = info.hd ? 1 : 2;
     const layer = await addLayer(joinPath(skinPath, info.rel), { name, locked: true });
@@ -298,13 +322,18 @@ function build(el, base, saved, close, backdrop, opts) {
     selected = null;
   }
 
-  function hit(l, px, py) {
+  /** A canvas point in the layer's own image pixels. */
+  function toLayer(l, px, py) {
     const r = (-l.rotation * Math.PI) / 180;
     const dx = px - l.x;
     const dy = py - l.y;
     const ux = (dx * Math.cos(r) - dy * Math.sin(r)) / l.scale;
     const uy = (dx * Math.sin(r) + dy * Math.cos(r)) / (l.scale * l.stretch);
-    return Math.abs(ux) <= l.w / 2 && Math.abs(uy) <= l.h / 2;
+    return [(l.flip ? -ux : ux) + l.w / 2, uy + l.h / 2];
+  }
+  function hit(l, px, py) {
+    const [x, y] = toLayer(l, px, py);
+    return x >= 0 && y >= 0 && x <= l.w && y <= l.h;
   }
   function corners(l) {
     const r = (l.rotation * Math.PI) / 180;
@@ -314,6 +343,135 @@ function build(el, base, saved, close, backdrop, opts) {
       l.x + x * Math.cos(r) - y * Math.sin(r),
       l.y + x * Math.sin(r) + y * Math.cos(r),
     ]);
+  }
+
+  // ---- erasing ----------------------------------------------------------
+  // Erased parts are a mask over the layer's own pixels (0-255 each), so the
+  // source image stays untouched. Every stroke makes a new mask version and
+  // undo snapshots only hold the version number.
+  const brush = { id: 'move', size: 60, hard: 60 };
+  let brushAt = null; // pointer position in canvas pixels
+  let stroke = null;
+
+  /** The image to draw: the layer image without its erased parts. */
+  function source(l) {
+    if (!l.masks[l.maskVer]) return l.img;
+    if (l.viewVer !== l.maskVer) {
+      l.view ??= h('canvas', { width: l.w, height: l.h });
+      l.viewVer = l.maskVer;
+      updateView(l, [0, 0, l.w, l.h]);
+    }
+    return l.view;
+  }
+  function pixelsOf(l) {
+    if (!l.pixels) {
+      const cx = h('canvas', { width: l.w, height: l.h }).getContext('2d', { willReadFrequently: true });
+      cx.drawImage(l.img, 0, 0);
+      l.pixels = cx.getImageData(0, 0, l.w, l.h).data;
+    }
+    return l.pixels;
+  }
+  function updateView(l, [x0, y0, x1, y1]) {
+    const w = x1 - x0;
+    const hgt = y1 - y0;
+    if (w <= 0 || hgt <= 0) return;
+    const src = pixelsOf(l);
+    const mask = l.masks[l.maskVer];
+    const out = new ImageData(w, hgt);
+    for (let y = 0; y < hgt; y++) {
+      const row = (y0 + y) * l.w + x0;
+      out.data.set(src.subarray(row * 4, (row + w) * 4), y * w * 4);
+      for (let x = 0; x < w; x++) {
+        if (mask[row + x]) out.data[(y * w + x) * 4 + 3] = (src[(row + x) * 4 + 3] * (255 - mask[row + x])) / 255;
+      }
+    }
+    l.view.getContext('2d').putImageData(out, x0, y0);
+  }
+
+  /** One brush dab at a canvas point; grows `box` (layer pixels) by what changed. */
+  function dab(l, px, py, mode, box) {
+    const [cx, cy] = toLayer(l, px, py);
+    const rx = brush.size / 2 / l.scale;
+    const ry = rx / l.stretch;
+    const core = brush.hard / 100;
+    const x0 = Math.max(0, Math.floor(cx - rx));
+    const y0 = Math.max(0, Math.floor(cy - ry));
+    const x1 = Math.min(l.w, Math.ceil(cx + rx));
+    const y1 = Math.min(l.h, Math.ceil(cy + ry));
+    if (x0 >= x1 || y0 >= y1) return;
+    const mask = l.masks[l.maskVer];
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const d = Math.hypot((x + 0.5 - cx) / rx, (y + 0.5 - cy) / ry);
+        if (d > 1) continue;
+        const c = d <= core ? 255 : Math.round(((1 - d) / (1 - core)) * 255);
+        const i = y * l.w + x;
+        if (mode === 'erase') mask[i] = Math.max(mask[i], c);
+        else mask[i] = Math.round((mask[i] * (255 - c)) / 255);
+      }
+    }
+    box[0] = Math.min(box[0], x0);
+    box[1] = Math.min(box[1], y0);
+    box[2] = Math.max(box[2], x1);
+    box[3] = Math.max(box[3], y1);
+  }
+  function startStroke(e, px, py) {
+    const l = selected;
+    if (!l || l.hidden) return toast('Select a visible layer first, in the layer list or with the Move tool.', 'error');
+    const mask = l.masks[l.maskVer];
+    l.masks.push(mask ? mask.slice() : new Uint8Array(l.w * l.h));
+    l.maskVer = l.masks.length - 1;
+    source(l);
+    // Alt flips between erasing and restoring while held.
+    stroke = { layer: l, x: px, y: py, mode: e.altKey ? (brush.id === 'erase' ? 'restore' : 'erase') : brush.id };
+    const box = [Infinity, Infinity, -Infinity, -Infinity];
+    dab(l, px, py, stroke.mode, box);
+    updateView(l, box);
+    canvas.setPointerCapture(e.pointerId);
+    render();
+  }
+  function continueStroke(px, py) {
+    const { layer: l, mode } = stroke;
+    const dist = Math.hypot(px - stroke.x, py - stroke.y);
+    const stepLen = Math.max(1, brush.size * 0.15);
+    if (dist < stepLen) return;
+    const box = [Infinity, Infinity, -Infinity, -Infinity];
+    for (let t = stepLen; t <= dist; t += stepLen) dab(l, stroke.x + ((px - stroke.x) * t) / dist, stroke.y + ((py - stroke.y) * t) / dist, mode, box);
+    Object.assign(stroke, { x: px, y: py });
+    updateView(l, box);
+  }
+  function clearMask() {
+    if (!selected?.masks[selected.maskVer]) return;
+    selected.masks.push(null);
+    selected.maskVer = selected.masks.length - 1;
+    commit();
+  }
+
+  /** The mask as the alpha of a black PNG, or undefined if nothing is erased. */
+  async function maskPng(l) {
+    const mask = l.masks[l.maskVer];
+    if (!mask?.some((v) => v)) return undefined;
+    const c = h('canvas', { width: l.w, height: l.h });
+    const data = new ImageData(l.w, l.h);
+    for (let i = 0; i < mask.length; i++) data.data[i * 4 + 3] = mask[i];
+    c.getContext('2d').putImageData(data, 0, 0);
+    const blob = await new Promise((resolve) => c.toBlob(resolve, 'image/png'));
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+  async function loadMask(l, path) {
+    try {
+      const img = await loadImage(path);
+      if (img.naturalWidth !== l.w || img.naturalHeight !== l.h) return;
+      const cx = h('canvas', { width: l.w, height: l.h }).getContext('2d', { willReadFrequently: true });
+      cx.drawImage(img, 0, 0);
+      const d = cx.getImageData(0, 0, l.w, l.h).data;
+      const mask = new Uint8Array(l.w * l.h);
+      for (let i = 0; i < mask.length; i++) mask[i] = d[i * 4 + 3];
+      l.masks = [null, mask];
+      l.maskVer = 1;
+    } catch {
+      toast(`Could not load the erased parts of ${l.name}`, 'error');
+    }
   }
 
   // ---- drawing ----------------------------------------------------------
@@ -329,7 +487,7 @@ function build(el, base, saved, close, backdrop, opts) {
       ctx.translate(l.x, l.y);
       ctx.rotate((l.rotation * Math.PI) / 180);
       ctx.scale(l.flip ? -l.scale : l.scale, l.scale * l.stretch);
-      ctx.drawImage(l.img, -l.w / 2, -l.h / 2);
+      ctx.drawImage(source(l), -l.w / 2, -l.h / 2);
       ctx.restore();
     }
   }
@@ -353,6 +511,7 @@ function build(el, base, saved, close, backdrop, opts) {
       const px = 1 / viewScale(); // one screen pixel in canvas pixels
       if (view.guides) drawGuides(px);
       if (selected && !selected.hidden) drawSelection(selected, px);
+      if (brush.id !== 'move' && brushAt) drawBrush(px);
       refreshProps();
     });
   }
@@ -412,6 +571,19 @@ function build(el, base, saved, close, backdrop, opts) {
     ctx.restore();
   }
 
+  function drawBrush(px) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(brushAt[0], brushAt[1], brush.size / 2, 0, Math.PI * 2);
+    ctx.lineWidth = 3 * px;
+    ctx.strokeStyle = 'rgba(0, 0, 0, .7)';
+    ctx.stroke();
+    ctx.lineWidth = 1.2 * px;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // ---- stage interaction -------------------------------------------------
   const stage = h('div.compose-stage', canvas);
 
@@ -434,6 +606,7 @@ function build(el, base, saved, close, backdrop, opts) {
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     const [px, py] = toCanvas(e);
+    if (brush.id !== 'move') return startStroke(e, px, py);
     const tol = (HANDLE_PX / viewScale()) * 0.8;
     // A corner handle of the selected layer scales it around its centre.
     const corner = selected && !selected.locked && !selected.hidden && corners(selected).some(([x, y]) => Math.abs(x - px) <= tol && Math.abs(y - py) <= tol);
@@ -450,6 +623,12 @@ function build(el, base, saved, close, backdrop, opts) {
   });
   canvas.addEventListener('pointermove', (e) => {
     const [px, py] = toCanvas(e);
+    if (brush.id !== 'move') {
+      canvas.style.cursor = 'none';
+      brushAt = [px, py];
+      if (stroke) continueStroke(px, py);
+      return render();
+    }
     if (!drag) {
       canvas.style.cursor = doc.layers.some((l) => !l.hidden && !l.locked && hit(l, px, py)) ? 'move' : 'default';
       return;
@@ -464,12 +643,17 @@ function build(el, base, saved, close, backdrop, opts) {
     render();
   });
   const endDrag = () => {
-    if (!drag) return;
-    drag = null;
+    if (!drag && !stroke) return;
+    drag = stroke = null;
     commit();
   };
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerleave', () => {
+    if (stroke) return;
+    brushAt = null;
+    render();
+  });
 
   stage.addEventListener('wheel', (e) => {
     if (e.ctrlKey) {
@@ -516,6 +700,10 @@ function build(el, base, saved, close, backdrop, opts) {
     } else if (mod && e.key.toLowerCase() === 'y') {
       e.preventDefault();
       step(redo, undo);
+    } else if (!mod && ['v', 'e', 'r'].includes(e.key.toLowerCase())) {
+      setTool({ v: 'move', e: 'erase', r: 'restore' }[e.key.toLowerCase()]);
+    } else if (!mod && (e.key === '[' || e.key === ']')) {
+      setBrushSize(brush.size * (e.key === ']' ? 1.2 : 1 / 1.2));
     } else if (selected && !selected.locked && e.key.startsWith('Arrow')) {
       e.preventDefault();
       const d = e.shiftKey ? 10 : 1;
@@ -635,12 +823,46 @@ function build(el, base, saved, close, backdrop, opts) {
       h('button.small.danger', { onclick: removeSelected }, 'Remove'),
     ),
   );
+  // Tools
+  const toolBtns = {};
+  const toolRow = h('div.segmented', [['move', 'Move', 'V'], ['erase', 'Erase', 'E'], ['restore', 'Restore', 'R']].map(([id, label, key]) =>
+    (toolBtns[id] = h('button.small', { title: `${label} (${key})`, onclick: () => setTool(id) }, label))));
+  const sizeOut = h('span.muted.small');
+  const sizeIn = h('input', { type: 'range', min: 2, max: 1000, oninput: (e) => setBrushSize(Number(e.target.value)) });
+  const hardOut = h('span.muted.small', `${brush.hard}%`);
+  const hardIn = h('input', { type: 'range', min: 0, max: 100, value: brush.hard, oninput: (e) => { brush.hard = Number(e.target.value); hardOut.textContent = `${brush.hard}%`; } });
+  const clearBtn = h('button.small', { title: 'Bring back everything erased from the selected layer', onclick: clearMask }, 'Clear erased parts');
+  const brushOpts = h('div', field(h('span', 'Brush size ', sizeOut), sizeIn), field(h('span', 'Hardness ', hardOut), hardIn));
+  const toolHint = h('small.hint');
+  function setBrushSize(v) {
+    brush.size = Math.max(2, Math.min(1000, Math.round(v)));
+    sizeIn.value = brush.size;
+    sizeOut.textContent = `${brush.size} px`;
+    render();
+  }
+  function setTool(id) {
+    brush.id = id;
+    for (const [k, b] of Object.entries(toolBtns)) b.classList.toggle('active', k === id);
+    brushOpts.hidden = id === 'move';
+    if (id === 'move') canvas.style.cursor = 'default';
+    toolHint.textContent = id === 'move'
+      ? 'Click a layer to select it, then pick Erase to remove parts of it.'
+      : id === 'erase'
+        ? 'Paint over the selected layer to remove those parts. Hold Alt to restore instead. Its source image is kept, so nothing is lost.'
+        : 'Paint to bring back erased parts of the selected layer. Hold Alt to erase instead.';
+    render();
+  }
+  setBrushSize(brush.size);
+  setTool('move');
+  const toolBox = h('fieldset', h('legend', 'Tool'), toolRow, brushOpts, toolHint, h('div.actions', clearBtn));
+
   const syncers = [widthIn, heightIn, fillOn, xIn, yIn, scaleIn, rotIn, opIn, ...[flipChk, hiddenChk, lockedChk].map((c) => c.firstChild)];
 
   function refreshProps() {
     syncers.forEach((s) => s.sync());
     layerBox.hidden = !selected;
     if (selected) sizeInfo.textContent = `${selected.name} · ${selected.w}×${selected.h} → ${Math.round(selected.w * selected.scale)}×${Math.round(selected.h * selected.scale * selected.stretch)}`;
+    clearBtn.disabled = !selected?.masks[selected.maskVer];
     undoBtn.disabled = !undo.length;
     redoBtn.disabled = !redo.length;
   }
@@ -680,7 +902,7 @@ function build(el, base, saved, close, backdrop, opts) {
       if (elementInfo(el, { skinPath: s.path, files })) fromSkin.append(h('option', { value: s.path }, s.name));
     }
   })();
-  const own = resolveImage(base);
+  const own = current();
 
   const undoBtn = h('button.small', { title: 'Undo (Ctrl+Z)', onclick: () => step(undo, redo) }, '↶ Undo');
   const redoBtn = h('button.small', { title: 'Redo (Ctrl+Shift+Z)', onclick: () => step(redo, undo) }, '↷ Redo');
@@ -699,9 +921,9 @@ function build(el, base, saved, close, backdrop, opts) {
       status.textContent = 'Saving…';
       const project = {
         version: 1, width: doc.width, height: doc.height, fill: doc.fill,
-        layers: doc.layers.map((l) => ({ path: l.path, name: l.name, ...Object.fromEntries(PROPS.map((k) => [k, l[k]])) })),
+        layers: await Promise.all(doc.layers.map(async (l) => ({ path: l.path, name: l.name, ...Object.fromEntries(PROPS.map((k) => [k, l[k]])), mask: await maskPng(l) }))),
       };
-      const res = await api.composeSave(state.skin.path, base, images, project);
+      const res = await api.composeSave(state.skin.path, base, images, project, { anim });
       await refreshFiles();
       toast(`Wrote ${res.written.join(', ')}`, 'ok');
       savedState = committed;
@@ -766,6 +988,7 @@ function build(el, base, saved, close, backdrop, opts) {
       ),
       fromSkin,
     ),
+    toolBox,
     layerBox,
     h('fieldset',
       h('legend', 'View'),
@@ -775,7 +998,7 @@ function build(el, base, saved, close, backdrop, opts) {
         h('button.small', { onclick: () => { view.zoom = 1; applyZoom(); } }, '100%'),
         zoomLabel),
       h('label.check', h('input', { type: 'checkbox', checked: view.guides, onchange: (e) => { view.guides = e.target.checked; render(); } }), 'Show screen guides'),
-      h('small.hint', 'Drag to move, drag a corner or scroll over the layer to scale, arrow keys nudge (Shift = 10 px), Ctrl + scroll zooms.'),
+      h('small.hint', 'Drag to move, drag a corner or scroll over the layer to scale, arrow keys nudge (Shift = 10 px), Ctrl + scroll zooms. V, E and R switch tools, [ and ] change the brush size.'),
     ),
     h('label.check', h('input', { type: 'checkbox', checked: view.sd, onchange: (e) => (view.sd = e.target.checked) }), 'Also write a half-size SD copy'),
     status,

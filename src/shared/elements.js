@@ -4,7 +4,7 @@
 //          '' => name0.png), undefined if static
 //   sound: true for audio elements (.wav/.ogg/.mp3)
 //   size : recommended @2x (HD) size in pixels, informational only
-//   compose: can be built in the composer (layers, e.g. a character):
+//   compose: composer presets and guides (every image can be composed):
 //            'panel' for ranking-panel, 'stage' for the mania stage sides (+ side),
 //            'button' for the song select beatmap panel, 'bottom' for mania-stage-bottom
 

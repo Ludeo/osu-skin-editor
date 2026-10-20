@@ -115,7 +115,7 @@ export function mountElements(root) {
           if (p && (await importInto(toTarget(el), p))) renderDetail();
         },
       }, 'Cut out…'),
-      el.compose ? h('button', { title: 'Combine images, e.g. place a character on a big background', onclick: async () => { if (await openComposer(el)) renderDetail(); } }, 'Compose…') : null,
+      el.sound ? null : h('button', { title: 'Combine images, e.g. place a character on a big background', onclick: async () => { if (await openComposer(el)) renderDetail(); } }, 'Compose…'),
       el.compose === 'bottom' ? h('button', {
         title: 'Paint mania-stage-left and -right into this image where osu! draws them, so a lane cover doesn\'t hide them',
         onclick: async () => { if (await openComposer(el, { base: stageBottomBase(), addSides: true })) renderDetail(); },
